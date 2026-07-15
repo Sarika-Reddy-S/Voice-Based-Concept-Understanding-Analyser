@@ -49,6 +49,15 @@ def _score_pauses(silence_ratio: float) -> float:
     return max(0.0, 100 - penalty)
 
 
+def _score_filler_words(filler_ratio: float) -> float:
+    # A small amount of filler is natural in spontaneous speech; heavy use
+    # ("um", "like", "you know") signals disfluency and lowers clarity.
+    if filler_ratio <= 0.03:
+        return 100.0
+    penalty = (filler_ratio - 0.03) * 300
+    return max(0.0, 100 - penalty)
+
+
 def _score_pitch_stability(pitch_std: float) -> float:
     # Some pitch variation indicates natural, expressive speech; very flat
     # (monotone) or wildly erratic pitch both reduce clarity.
@@ -78,13 +87,14 @@ def compute_score(
     semantic_result: SemanticResult,
     audio_features: AudioFeatures,
     word_count: int,
+    filler_ratio: float = 0.0,
 ) -> ScoreBreakdown:
     """
     Combine semantic and acoustic signals into an overall score.
 
     Weighting:
         Understanding (semantic similarity): 55%
-        Fluency (speaking rate + pause pattern): 25%
+        Fluency (speaking rate + pause pattern + filler-word ratio): 25%
         Clarity (pitch stability + energy consistency): 20%
     """
     understanding_score = round(semantic_result.overall_similarity * 100, 2)
@@ -92,7 +102,8 @@ def compute_score(
     wpm = compute_speaking_rate(word_count, audio_features.duration_sec)
     rate_score = _score_speaking_rate(wpm)
     pause_score = _score_pauses(audio_features.silence_ratio)
-    fluency_score = round((rate_score * 0.6 + pause_score * 0.4), 2)
+    filler_score = _score_filler_words(filler_ratio)
+    fluency_score = round((rate_score * 0.45 + pause_score * 0.30 + filler_score * 0.25), 2)
 
     pitch_score = _score_pitch_stability(audio_features.pitch_std_hz)
     energy_consistency = 100 - min(
@@ -119,6 +130,8 @@ def compute_score(
         feedback.append("Slow down slightly — you may be rushing through the explanation.")
     if audio_features.silence_ratio > 0.30:
         feedback.append("Reduce long pauses; they can make the explanation feel hesitant.")
+    if filler_ratio > 0.08:
+        feedback.append("Try to cut down on filler words like 'um', 'like', and 'you know'.")
     if pitch_score < 50:
         feedback.append("Vary your intonation a little more to sound more engaging.")
     if not feedback:

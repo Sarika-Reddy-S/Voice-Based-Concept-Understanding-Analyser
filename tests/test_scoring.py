@@ -75,3 +75,18 @@ def test_feedback_not_empty():
     features = make_features(silence_ratio=0.5)
     score = compute_score(semantic, features, word_count=20)
     assert len(score.feedback) > 0
+
+
+def test_high_filler_ratio_lowers_fluency_score():
+    semantic = SemanticResult(overall_similarity=0.9)
+    features = make_features()
+    low_filler = compute_score(semantic, features, word_count=70, filler_ratio=0.0)
+    high_filler = compute_score(semantic, features, word_count=70, filler_ratio=0.25)
+    assert high_filler.fluency_score < low_filler.fluency_score
+
+
+def test_high_filler_ratio_triggers_feedback():
+    semantic = SemanticResult(overall_similarity=0.9)
+    features = make_features()
+    score = compute_score(semantic, features, word_count=70, filler_ratio=0.15)
+    assert any("filler" in f.lower() for f in score.feedback)

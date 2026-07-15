@@ -31,6 +31,7 @@ VBCUA lets a learner record or upload a spoken explanation of a concept, compare
 - 📝 Automatic speech-to-text transcription (OpenAI Whisper)
 - 🧠 Semantic similarity scoring against a reference explanation (Sentence-BERT)
 - 📊 Audio feature extraction: speaking rate, pauses, pitch, energy (Librosa)
+- 🗯️ Filler-word detection ("um", "uh", "like", "you know", ...) and filler ratio
 - 🎯 Composite scoring engine (Understanding / Fluency / Clarity / Overall)
 - 📈 Waveform visualization
 - 🗂️ Session history and persistence (SQLite)
@@ -56,10 +57,40 @@ Audio Input → Whisper Transcription → Sentence-BERT Semantic Comparison
                     │                              │
                     ▼                              ▼
             Librosa Audio Features ──────► Scoring Engine ──► PDF Report
-                                                    │
-                                                    ▼
-                                          SQLite Session Storage
+                    │                              │
+                    ▼                              ▼
+         Filler-Word Detection          SQLite Relational Storage
 ```
+
+## Data Model (Entity-Relationship Design)
+
+The persistence layer (`modules/data_storage.py`) implements the following
+entities and relationships, matching the project's ER design:
+
+```
+USER 1───N AUDIO_FILE (uploads)
+AUDIO_FILE 1───1 TRANSCRIPT (generates)
+AUDIO_FILE 1───1 AUDIO_FEATURE (analyzed for)
+TRANSCRIPT 1───1 FILLER_WORD_STATS (analyzed for)
+TRANSCRIPT ─── REFERENCE_CONCEPT  via SEMANTIC_SIMILARITY (compared with)
+AUDIO_FILE, REFERENCE_CONCEPT ──► EVALUATION_RESULT (evaluated as)
+EVALUATION_RESULT 1───1 REPORT (generates)
+EVALUATION_RESULT N───1 SESSION (belongs to)
+USER 1───N SESSION
+```
+
+| Entity | Key Fields |
+|---|---|
+| `USER` | user_id (PK), name, email, role, created_at |
+| `SESSION` | session_id (PK), user_id (FK), started_at, ended_at, status |
+| `AUDIO_FILE` | audio_id (PK), user_id (FK), file_name, file_path, duration_sec, uploaded_at, status |
+| `REFERENCE_CONCEPT` | ref_concept_id (PK), concept_title, concept_text, created_at |
+| `TRANSCRIPT` | transcript_id (PK), audio_id (FK), transcript_text, created_at |
+| `AUDIO_FEATURE` | feature_id (PK), audio_id (FK), pause_ratio, rms_energy, zero_crossing_rate, duration_sec |
+| `FILLER_WORD_STATS` | filler_id (PK), transcript_id (FK), filler_word_count, total_words, filler_ratio |
+| `SEMANTIC_SIMILARITY` | similarity_id (PK), transcript_id (FK), ref_concept_id (FK), similarity_score |
+| `EVALUATION_RESULT` | result_id (PK), audio_id (FK), ref_concept_id (FK), session_id (FK), overall_score, understanding_level (Strong/Moderate/Poor), notes |
+| `REPORT` | report_id (PK), result_id (FK), pdf_path, generated_at, file_size_kb |
 
 ---
 
@@ -82,6 +113,7 @@ Developed modules for:
 - Speech transcription (`modules/transcription.py`)
 - Semantic evaluation (`modules/semantic_analysis.py`)
 - Audio feature extraction (`modules/audio_features.py`)
+- Filler-word / disfluency detection (`modules/filler_words.py`)
 - Scoring engine (`modules/scoring.py`)
 - PDF report generation (`modules/report_generator.py`)
 
@@ -148,13 +180,15 @@ Voice-Based-Concept-Understanding-Analyser/
 │   ├── transcription.py          # Whisper speech-to-text
 │   ├── semantic_analysis.py      # Sentence-BERT similarity scoring
 │   ├── audio_features.py         # Librosa feature extraction
+│   ├── filler_words.py           # Filler-word / disfluency detection
 │   ├── scoring.py                # Composite scoring engine
 │   ├── report_generator.py       # ReportLab PDF generation
-│   └── data_storage.py           # SQLite persistence layer
+│   └── data_storage.py           # SQLite persistence layer (full ER schema)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_scoring.py
 │   ├── test_semantic.py
+│   ├── test_filler_words.py
 │   └── test_data_storage.py
 ├── data/                         # SQLite DB (generated at runtime)
 └── reports/                      # Generated PDF reports

@@ -4,7 +4,8 @@ app.py
 Voice-Based Concept Understanding Analyser (VBCUA) — Streamlit frontend.
 
 Ties together transcription, semantic evaluation, audio feature
-extraction, scoring, PDF reporting, and session persistence into a
+extraction, filler-word analysis, scoring, PDF reporting, and the
+full relational session/audio/evaluation persistence layer into a
 single interactive web application.
 
 Run with:
@@ -25,6 +26,7 @@ from modules.audio_features import (
     generate_waveform_data,
     get_audio_metadata,
 )
+from modules.filler_words import analyze_filler_words
 from modules.report_generator import generate_pdf_report
 from modules.scoring import compute_score
 from modules.semantic_analysis import get_semantic_evaluator
@@ -59,6 +61,10 @@ def render_sidebar():
         "and audio feature analysis."
     )
     st.sidebar.markdown("---")
+    st.sidebar.subheader("Learner")
+    user_name = st.sidebar.text_input("Your name", value=st.session_state.get("user_name", "Guest"))
+    st.session_state["user_name"] = user_name
+
     st.sidebar.subheader("Model Settings")
     whisper_size = st.sidebar.selectbox(
         "Whisper model size", ["tiny", "base", "small", "medium"], index=1
@@ -72,14 +78,17 @@ def render_sidebar():
     if history:
         for h in history:
             score_txt = f"{h['overall_score']:.1f}" if h.get("overall_score") is not None else "—"
-            st.sidebar.write(f"#{h['id']} · {h['concept_title'] or 'Untitled'} · {score_txt}")
+            st.sidebar.write(
+                f"#{h['result_id']} · {h['concept_title'] or 'Untitled'} · "
+                f"{score_txt} ({h.get('understanding_level', '—')})"
+            )
     else:
         st.sidebar.caption("No past sessions yet.")
-    return whisper_size
+    return whisper_size, user_name
 
 
 def main():
-    whisper_size = render_sidebar()
+    whisper_size, user_name = render_sidebar()
 
     st.title("Voice-Based Concept Understanding Analyser")
     st.write(
@@ -106,13 +115,17 @@ def main():
     analyze_clicked = st.button("Analyze Recording", type="primary", disabled=audio_file is None)
 
     if analyze_clicked and audio_file is not None:
-        if not reference_text.strip():
-            st.warning("Please provide a reference explanation before analyzing.")
+        if not concept_title.strip() or not reference_text.strip():
+            st.warning("Please provide both a concept title and a reference explanation before analyzing.")
             return
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(audio_file.name).suffix) as tmp:
             tmp.write(audio_file.read())
             tmp_path = tmp.name
+
+        # --- start relational session ---
+        user_id = data_storage.get_or_create_user(user_name or "Guest")
+        session_id = data_storage.start_session(user_id)
 
         try:
             with st.spinner("Transcribing speech..."):
@@ -123,19 +136,46 @@ def main():
                 features = extract_features(tmp_path)
                 metadata = get_audio_metadata(tmp_path)
 
+            with st.spinner("Detecting filler words..."):
+                filler_stats = analyze_filler_words(transcription.text)
+
             with st.spinner("Running semantic similarity analysis..."):
                 evaluator = get_semantic_evaluator()
                 semantic_result = evaluator.evaluate(transcription.text, reference_text)
 
-            score = compute_score(semantic_result, features, transcription.word_count)
-
-            # --- Persist session ---
-            session_id = data_storage.create_session(concept_title, reference_text)
-            data_storage.save_transcription(
-                session_id, transcription.text, transcription.language, transcription.duration
+            score = compute_score(
+                semantic_result, features, transcription.word_count, filler_stats.filler_ratio
             )
-            data_storage.save_audio_features(session_id, features)
-            data_storage.save_score(session_id, score)
+
+            # --- persist across the full ER schema ---
+            ref_concept_id = data_storage.get_or_create_reference_concept(concept_title, reference_text)
+
+            audio_id = data_storage.save_audio_file(
+                user_id=user_id,
+                file_name=audio_file.name,
+                file_path=tmp_path,
+                duration_sec=features.duration_sec,
+                status="processed",
+            )
+            transcript_id = data_storage.save_transcript(audio_id, transcription.text)
+            data_storage.save_audio_feature(
+                audio_id=audio_id,
+                pause_ratio=features.silence_ratio,
+                rms_energy=features.rms_energy_mean,
+                zero_crossing_rate=features.zero_crossing_rate,
+                duration_sec=features.duration_sec,
+            )
+            data_storage.save_filler_word_stats(transcript_id, filler_stats)
+            data_storage.save_semantic_similarity(
+                transcript_id, ref_concept_id, semantic_result.overall_similarity
+            )
+            result_id = data_storage.save_evaluation_result(
+                audio_id=audio_id,
+                ref_concept_id=ref_concept_id,
+                session_id=session_id,
+                overall_score=score.overall_score,
+                notes="; ".join(score.feedback),
+            )
 
             st.success("Analysis complete!")
 
@@ -147,7 +187,10 @@ def main():
             m1.metric("Understanding", f"{score.understanding_score:.1f}")
             m2.metric("Fluency", f"{score.fluency_score:.1f}")
             m3.metric("Clarity", f"{score.clarity_score:.1f}")
-            m4.metric("Overall", f"{score.overall_score:.1f}", score.grade)
+            m4.metric(
+                "Overall", f"{score.overall_score:.1f}",
+                data_storage.understanding_level_for(score.overall_score),
+            )
 
             st.subheader("Waveform")
             y, sr = generate_waveform_data(tmp_path)
@@ -158,7 +201,7 @@ def main():
                     {
                         "duration_sec": features.duration_sec,
                         "tempo_bpm": features.tempo_bpm,
-                        "silence_ratio": features.silence_ratio,
+                        "pause_ratio": features.silence_ratio,
                         "pitch_mean_hz": features.pitch_mean_hz,
                         "pitch_std_hz": features.pitch_std_hz,
                         "estimated_pause_count": features.estimated_pause_count,
@@ -166,6 +209,16 @@ def main():
                         "samplerate": metadata.get("samplerate"),
                     }
                 )
+
+            with st.expander("Filler Word Analysis"):
+                st.write(f"Total words: {filler_stats.total_words}")
+                st.write(f"Filler words: {filler_stats.filler_word_count}")
+                st.write(f"Filler ratio: {filler_stats.filler_ratio:.2%}")
+                if filler_stats.breakdown:
+                    st.table(
+                        {"word/phrase": list(filler_stats.breakdown.keys()),
+                         "count": list(filler_stats.breakdown.values())}
+                    )
 
             st.subheader("Concept Coverage")
             cc1, cc2 = st.columns(2)
@@ -182,10 +235,10 @@ def main():
 
             # --- PDF report ---
             wpm = round((transcription.word_count / features.duration_sec) * 60, 2) if features.duration_sec else 0
-            report_path = str(REPORTS_DIR / f"vbcua_report_session_{session_id}.pdf")
+            report_path = str(REPORTS_DIR / f"vbcua_report_result_{result_id}.pdf")
             generate_pdf_report(
                 output_path=report_path,
-                concept_title=concept_title or "Untitled Concept",
+                concept_title=concept_title,
                 transcript=transcription.text,
                 reference_text=reference_text,
                 score=score,
@@ -194,6 +247,9 @@ def main():
                 matched_keywords=semantic_result.matched_keywords,
                 missing_keywords=semantic_result.missing_keywords,
             )
+            file_size_kb = round(os.path.getsize(report_path) / 1024)
+            data_storage.save_report(result_id, report_path, file_size_kb)
+
             with open(report_path, "rb") as f:
                 st.download_button(
                     "Download PDF Report",
@@ -201,6 +257,11 @@ def main():
                     file_name=os.path.basename(report_path),
                     mime="application/pdf",
                 )
+
+            data_storage.end_session(session_id, status="completed")
+        except Exception:
+            data_storage.end_session(session_id, status="failed")
+            raise
         finally:
             os.unlink(tmp_path)
 
