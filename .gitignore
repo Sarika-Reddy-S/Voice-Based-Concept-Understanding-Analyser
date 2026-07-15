@@ -1,29 +1,48 @@
-# Byte-compiled / cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-.pytest_cache/
+*.pyc
+*.pyo
 
 # Virtual environments
 venv/
-env/
 .venv/
+env/
+ENV/
+
+# Distribution / packaging
+.eggs/
+dist/
+build/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
 
 # Streamlit
 .streamlit/
 
-# Data & generated artifacts
+# Database (generated at runtime)
+data/vbcua.db
 data/*.db
+
+# Reports & assets (generated at runtime)
 reports/*.pdf
-
-# Whisper / model caches
-*.pt
-.cache/
-
-# OS files
-.DS_Store
-Thumbs.db
+assets/waveform_*.png
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Whisper model cache (can be large)
+# ~/.cache/whisper/

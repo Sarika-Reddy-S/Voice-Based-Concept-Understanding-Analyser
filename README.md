@@ -10,69 +10,106 @@ Voice-Based Concept Understanding Analyser (VBCUA) is an AI-powered application 
 2. [Features](#features)
 3. [Tech Stack](#tech-stack)
 4. [Architecture](#architecture)
-5. [Instructions](#instructions)
+5. [Data Model (ER Design)](#data-model-entity-relationship-design)
 6. [Installation](#installation)
 7. [Usage](#usage)
 8. [Project Structure](#project-structure)
 9. [Testing](#testing)
-10. [Outcome](#outcome)
-11. [Future Enhancements](#future-enhancements)
-12. [License](#license)
+10. [Project Workflow](#project-workflow)
+11. [Outcome](#outcome)
+12. [Future Enhancements](#future-enhancements)
+13. [License](#license)
 
 ---
 
 ## Overview
 
-VBCUA lets a learner record or upload a spoken explanation of a concept, compares it against a reference explanation using semantic similarity, and analyzes delivery quality (speaking rate, pauses, pitch stability) from the raw audio. The result is a composite **Concept Understanding Score** plus actionable feedback and a downloadable PDF report — useful for self-study, viva/interview practice, or classroom assessment.
+VBCUA lets a learner record or upload a spoken explanation of a concept, compares it against a reference explanation using semantic similarity, and analyzes delivery quality (speaking rate, pauses, pitch stability, energy confidence) from the raw audio. The result is a composite **Concept Understanding Score** (Strong / Moderate / Poor) plus actionable feedback and a downloadable PDF report — useful for self-study, viva/interview practice, or classroom assessment.
+
+The system was developed using Python and modern AI/ML libraries for speech processing, semantic analysis, web application development, and report generation. Key technologies include **FastAPI**, **Streamlit**, **Librosa**, **Whisper**, **Sentence-BERT**, **ReportLab**, and **Visual Studio Code** for development support.
+
+---
+
+## References
+
+- **Python**: https://www.python.org/downloads/
+- **FastAPI**: https://fastapi.tiangolo.com/
+- **Streamlit**: https://docs.streamlit.io/
+- **Librosa**: https://librosa.org/doc/latest/index.html
+- **Whisper**: https://github.com/openai/whisper
+- **Sentence-BERT**: https://www.sbert.net/docs/
+- **ReportLab**: https://www.reportlab.com/docs/reportlab-userguide.pdf
+- **Visual Studio Code**: https://code.visualstudio.com/
+
+---
 
 ## Features
 
-- 🎙️ Audio upload & in-browser playback
-- 📝 Automatic speech-to-text transcription (OpenAI Whisper)
-- 🧠 Semantic similarity scoring against a reference explanation (Sentence-BERT)
-- 📊 Audio feature extraction: speaking rate, pauses, pitch, energy (Librosa)
-- 🗯️ Filler-word detection ("um", "uh", "like", "you know", ...) and filler ratio
-- 🎯 Composite scoring engine (Understanding / Fluency / Clarity / Overall)
-- 📈 Waveform visualization
-- 🗂️ Session history and persistence (SQLite)
-- 📄 One-click PDF report generation (ReportLab)
+- 🎙️ Audio upload & in-browser playback (WAV, MP3, M4A, OGG, FLAC)
+- 📝 Automatic speech-to-text transcription via **OpenAI Whisper**
+- 🧠 Semantic similarity scoring against a reference explanation (**Sentence-BERT**)
+- 📊 Audio feature extraction: speaking rate, pause ratio, RMS energy, pitch, ZCR (**Librosa**)
+- 🗯️ Filler-word detection ("um", "uh", "like", "you know", …) and filler ratio
+- 🎯 Scoring engine: `evaluate_understanding(similarity, filler_ratio, audio)` → Strong / Moderate / Poor
+- 📈 Waveform visualization (dark-themed Matplotlib plot)
+- 🗂️ Session history and full relational persistence (**SQLite**)
+- 📄 One-click PDF report generation (**ReportLab**)
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Streamlit |
-| Speech-to-text | OpenAI Whisper |
-| Semantic similarity | Sentence-Transformers (Sentence-BERT) |
-| Audio processing | Librosa, SoundFile |
-| Numerical / plotting | NumPy, Matplotlib |
-| Report generation | ReportLab |
+| Frontend UI | Streamlit |
+| Speech-to-Text | OpenAI Whisper |
+| Semantic Similarity | Sentence-Transformers (Sentence-BERT, all-MiniLM-L6-v2) |
+| Audio Processing | Librosa, SoundFile, audioread |
+| Numerical / Plotting | NumPy, Matplotlib |
+| Report Generation | ReportLab |
 | Testing | Pytest |
-| Persistence | SQLite |
+| Persistence | SQLite (stdlib `sqlite3`) |
+
+---
 
 ## Architecture
 
 ```
-Audio Input → Whisper Transcription → Sentence-BERT Semantic Comparison
-                    │                              │
-                    ▼                              ▼
-            Librosa Audio Features ──────► Scoring Engine ──► PDF Report
-                    │                              │
-                    ▼                              ▼
-         Filler-Word Detection          SQLite Relational Storage
+Audio Upload
+    │
+    ▼
+speech_to_text.py   ──►  Whisper transcription
+    │
+    ├──► filler_word_ratio()        (disfluency detection)
+    │
+    ▼
+semantic_eval.py    ──►  Sentence-BERT cosine similarity vs reference concept
+    │
+    ▼
+audio_utils.py      ──►  Librosa feature extraction (pause_ratio, rms_energy, ZCR, pitch)
+    │
+    ▼
+scoring_engine.py   ──►  evaluate_understanding(similarity, filler_ratio, audio)
+    │                     → score (0–100), level (Strong/Moderate/Poor), colour
+    ▼
+report_generator.py ──►  ReportLab PDF report
+    │
+    ▼
+data_storage.py     ──►  SQLite (full ER schema)
 ```
+
+---
 
 ## Data Model (Entity-Relationship Design)
 
-The persistence layer (`modules/data_storage.py`) implements the following
-entities and relationships, matching the project's ER design:
+The persistence layer (`modules/data_storage.py`) implements the following entities and relationships:
 
 ```
 USER 1───N AUDIO_FILE (uploads)
 AUDIO_FILE 1───1 TRANSCRIPT (generates)
 AUDIO_FILE 1───1 AUDIO_FEATURE (analyzed for)
 TRANSCRIPT 1───1 FILLER_WORD_STATS (analyzed for)
-TRANSCRIPT ─── REFERENCE_CONCEPT  via SEMANTIC_SIMILARITY (compared with)
+TRANSCRIPT ──── REFERENCE_CONCEPT  via SEMANTIC_SIMILARITY (compared with)
 AUDIO_FILE, REFERENCE_CONCEPT ──► EVALUATION_RESULT (evaluated as)
 EVALUATION_RESULT 1───1 REPORT (generates)
 EVALUATION_RESULT N───1 SESSION (belongs to)
@@ -94,45 +131,6 @@ USER 1───N SESSION
 
 ---
 
-## Instructions
-
-The project was built following these development phases:
-
-### 1. Environment Setup & Dependency Configuration
-Configured the project using: Streamlit, OpenAI Whisper, Sentence-Transformers, Librosa & SoundFile, NumPy & Matplotlib, ReportLab, and Pytest (see [`requirements.txt`](requirements.txt)).
-
-### 2. Model Selection & Architecture
-Integrated AI and audio-processing frameworks for:
-- Speech-to-text transcription
-- Semantic similarity analysis
-- Audio signal processing
-- Fluency and scoring metrics
-
-### 3. Core Backend Development
-Developed modules for:
-- Speech transcription (`modules/transcription.py`)
-- Semantic evaluation (`modules/semantic_analysis.py`)
-- Audio feature extraction (`modules/audio_features.py`)
-- Filler-word / disfluency detection (`modules/filler_words.py`)
-- Scoring engine (`modules/scoring.py`)
-- PDF report generation (`modules/report_generator.py`)
-
-### 4. Data Persistence & Analysis Handling
-Implemented storage for transcriptions, audio features, evaluation scores, and session data (`modules/data_storage.py`, SQLite-backed).
-
-### 5. Streamlit Frontend UI Development
-Built an interactive interface (`app.py`) with:
-- Audio upload & playback
-- Waveform visualization
-- Real-time scoring
-- Understanding analysis
-- PDF report download
-
-### 6. Testing & Deployment
-Performed testing, optimization, validation, and deployment preparation (`tests/`).
-
----
-
 ## Installation
 
 ```bash
@@ -142,57 +140,85 @@ cd Voice-Based-Concept-Understanding-Analyser
 
 # 2. Create a virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate      # on Windows: venv\Scripts\activate
+# Windows:
+venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
-
-# Note: Whisper requires ffmpeg to be installed on your system.
-#   macOS:   brew install ffmpeg
-#   Ubuntu:  sudo apt install ffmpeg
-#   Windows: https://ffmpeg.org/download.html
 ```
+
+> **Note**: Whisper requires **ffmpeg** installed on your system.
+> - macOS: `brew install ffmpeg`
+> - Ubuntu: `sudo apt install ffmpeg`
+> - Windows: https://ffmpeg.org/download.html
+
+---
 
 ## Usage
 
 ```bash
 streamlit run app.py
+# or equivalently:
+streamlit run main.py
 ```
 
-Then, in the browser tab that opens:
-1. Enter the concept/topic title and paste the reference explanation.
-2. Upload an audio recording (`.wav`, `.mp3`, `.m4a`, `.ogg`, `.flac`).
-3. Click **Analyze Recording**.
-4. Review the transcript, scores, waveform, and feedback.
-5. Download the generated PDF report.
+In the browser tab that opens:
+
+1. Enter your name in the sidebar.
+2. Upload an audio recording (WAV / MP3 / M4A / OGG / FLAC).
+3. Paste the reference concept explanation on the right panel.
+4. Click **Analyze Concept Understanding**.
+5. Review the transcription, understanding score (Strong/Moderate/Poor), semantic similarity, filler word ratio, confidence energy, and waveform.
+6. Download the generated **PDF Report**.
+
+---
 
 ## Project Structure
 
 ```
 Voice-Based-Concept-Understanding-Analyser/
-├── app.py                        # Streamlit frontend
+├── app.py                         # Streamlit front-end and main application logic
+├── main.py                        # Entry-point alias (streamlit run main.py)
 ├── requirements.txt
 ├── README.md
 ├── LICENSE
 ├── .gitignore
+│
 ├── modules/
-│   ├── __init__.py
-│   ├── transcription.py          # Whisper speech-to-text
-│   ├── semantic_analysis.py      # Sentence-BERT similarity scoring
-│   ├── audio_features.py         # Librosa feature extraction
-│   ├── filler_words.py           # Filler-word / disfluency detection
-│   ├── scoring.py                # Composite scoring engine
-│   ├── report_generator.py       # ReportLab PDF generation
-│   └── data_storage.py           # SQLite persistence layer (full ER schema)
+│   ├── __init__.py                # Public API exports
+│   ├── audio_utils.py             # Audio loading and feature extraction utilities
+│   ├── speech_to_text.py          # Whisper-based transcription logic
+│   ├── semantic_eval.py           # Semantic similarity using Sentence-BERT
+│   ├── scoring_engine.py          # Understanding score calculation and classification
+│   ├── filler_words.py            # Filler-word / disfluency detection
+│   ├── report_generator.py        # PDF report generation using ReportLab
+│   ├── data_storage.py            # SQLite persistence layer (full ER schema)
+│   │
+│   │── (shims for backward compatibility)
+│   ├── audio_features.py          → delegates to audio_utils.py
+│   ├── transcription.py           → delegates to speech_to_text.py
+│   ├── semantic_analysis.py       → delegates to semantic_eval.py
+│   └── scoring.py                 → delegates to scoring_engine.py
+│
 ├── tests/
 │   ├── __init__.py
-│   ├── test_scoring.py
-│   ├── test_semantic.py
-│   ├── test_filler_words.py
-│   └── test_data_storage.py
-├── data/                         # SQLite DB (generated at runtime)
-└── reports/                      # Generated PDF reports
+│   ├── test_audio_utils.py        # AudioFeatures, speaking rate
+│   ├── test_speech_to_text.py     # filler_word_ratio, TranscriptionResult
+│   ├── test_semantic_eval.py      # sentence splitting, keyword extraction
+│   ├── test_scoring_engine.py     # evaluate_understanding, compute_score
+│   ├── test_scoring.py            # legacy scoring tests
+│   ├── test_semantic.py           # legacy semantic tests
+│   ├── test_filler_words.py       # filler word analysis
+│   └── test_data_storage.py       # SQLite CRUD operations
+│
+├── data/                          # SQLite DB (auto-created at runtime)
+├── assets/                        # Waveform images (auto-generated)
+└── reports/                       # Generated PDF reports
 ```
+
+---
 
 ## Testing
 
@@ -200,24 +226,71 @@ Voice-Based-Concept-Understanding-Analyser/
 pytest tests/ -v
 ```
 
-Tests cover the scoring engine (speaking-rate scoring, pause scoring, grading, feedback generation), semantic-analysis helper functions (sentence splitting, keyword extraction), and the SQLite persistence layer.
+Tests cover:
+- **Scoring engine**: `evaluate_understanding` formula, sub-scores, grade labels, feedback generation
+- **Audio utilities**: `AudioFeatures` dataclass, speaking-rate edge cases
+- **Speech-to-text**: filler word ratio computation, `TranscriptionResult`
+- **Semantic eval**: sentence splitting, keyword extraction, `SemanticResult`
+- **Filler words**: detection accuracy, ratio computation
+- **Data storage**: SQLite CRUD, session lifecycle
+
+---
+
+## Project Workflow
+
+### Epic 1: Environment Setup
+- **Story 1**: Python Environment and Dependency Installation
+  - Created and activated `venv`; installed all `requirements.txt` dependencies
+- **Story 2**: Project Structure Initialization
+  - Organized modular structure: `app.py`, `modules/`, `tests/`, `data/`, `reports/`, `assets/`
+- **Story 3**: Streamlit Application Initialization
+  - Launched with `streamlit run main.py`; confirmed UI loads at `localhost:8501`
+
+### Epic 2: Core Engine Development
+- **Story 1**: Speech-to-Text Module Development (`modules/speech_to_text.py`)
+  - Integrated OpenAI Whisper; handles WAV normalization and multi-format inputs
+- **Story 2**: Semantic Understanding & Similarity Engine (`modules/semantic_eval.py`)
+  - Sentence-BERT embeddings; cosine similarity; keyword coverage analysis
+- **Story 3**: Audio Feature Extraction & Scoring Engine (`modules/audio_utils.py`, `modules/scoring_engine.py`)
+  - Librosa features; exact `evaluate_understanding` formula; Strong/Moderate/Poor classification
+
+### Epic 3: UI Development
+- **Story 1**: User Interface Design and Visualization (`app.py`)
+  - Dark-themed Streamlit layout with waveform, score card, metrics row
+- **Story 2**: Input Handling and Session State Management
+  - Audio uploader, session persistence, error handling
+- **Story 3**: Output Rendering and Report Generation
+  - Analysis banner, score display, feedback items, PDF download
+
+### Epic 4: Testing & Deployment
+- **Story 1**: Functional Testing and Validation — `pytest tests/ -v`
+- **Story 2**: Performance Testing and Optimization — `@st.cache_resource` / `lru_cache`
+- **Story 3**: Deployment Preparation — ready for Streamlit Community Cloud / Docker
+
+---
 
 ## Outcome
 
-By completing this project, the following was achieved:
-- Integrated Whisper and Sentence-BERT models into a single pipeline
-- Developed AI pipelines for speech and semantic analysis
-- Implemented fluency evaluation and automated scoring
-- Generated PDF reports with educational insights
-- Built a responsive Streamlit application for spoken concept assessment
+By completing this project:
+
+- Integrated **Whisper** (speech-to-text) and **Sentence-BERT** (semantic analysis) into a single pipeline
+- Developed AI-driven pipelines for speech analysis, semantic scoring, and fluency evaluation
+- Implemented the exact `evaluate_understanding` formula classifying answers as Strong / Moderate / Poor
+- Generated automated PDF reports with educational insights and feedback
+- Built a responsive, dark-themed Streamlit application matching the full project specification
+- Persisted all data in a **SQLite** relational schema matching the ER diagram
+
+---
 
 ## Future Enhancements
 
 - Multi-language support for transcription and evaluation
 - Live microphone recording directly in the browser
 - Rubric-based / multi-reference scoring for open-ended answers
-- User accounts and progress tracking over time
+- User accounts with progress tracking over time
 - Deployment to Streamlit Community Cloud / Docker container
+
+---
 
 ## License
 
