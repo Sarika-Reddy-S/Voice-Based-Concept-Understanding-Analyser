@@ -1,0 +1,11 @@
+streamlit>=1.32.0
+openai-whisper>=20231117
+sentence-transformers>=2.5.1
+librosa>=0.10.1
+soundfile>=0.12.1
+numpy>=1.26.0
+matplotlib>=3.8.0
+reportlab>=4.1.0
+pytest>=8.0.0
+torch>=2.1.0
+scipy>=1.11.0
